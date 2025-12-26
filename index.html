@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slovakia Seasonal Tilt Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #020205; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; }
+        
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.90);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .btn-season { position: relative; overflow: hidden; }
+        .btn-season:active { transform: scale(0.98); }
+
+        input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 16px; width: 16px;
+            border-radius: 50%; background: #3b82f6; cursor: pointer; margin-top: -6px;
+            border: 2px solid #1e293b;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px; cursor: pointer; background: #334155; border-radius: 2px;
+        }
+
+        #loader {
+            position: fixed; inset: 0; background: #020205; z-index: 50;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: opacity 0.5s;
+        }
+        .spinner {
+            width: 40px; height: 40px; border: 4px solid #1e293b;
+            border-top: 4px solid #3b82f6; border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div id="loader">
+        <div class="spinner mb-4"></div>
+        <h2 class="text-white text-lg font-semibold tracking-wider">LOADING EARTH DATA...</h2>
+        <p class="text-gray-500 text-sm mt-2">Checking local files...</p>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <!-- UI Overlay: Controls (Left) -->
+    <div class="absolute top-4 left-4 w-80 glass-panel text-gray-200 rounded-xl p-5 flex flex-col gap-4 z-10 max-h-[95vh] overflow-y-auto shadow-2xl">
+        <div class="border-b border-gray-700 pb-3">
+            <h1 class="text-xl font-bold text-white mb-0.5 tracking-tight">GeoSolar <span class="text-blue-500">Slovakia</span></h1>
+            <p class="text-[10px] text-gray-400 uppercase tracking-widest">Interactive Education Tool</p>
+        </div>
+
+        <div class="space-y-2">
+            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Observer Location</label>
+            <div class="relative">
+                <select id="location-select" class="w-full bg-gray-900/50 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors appearance-none cursor-pointer hover:border-gray-500">
+                    <option value="center">Slovakia (Center)</option>
+                    <option value="bratislava">Bratislava</option>
+                    <option value="kosice">Košice</option>
+                    <option value="presov">Prešov</option>
+                </select>
+                <div class="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                </div>
+            </div>
+            <div class="flex justify-between text-[11px] font-mono text-gray-400 px-1">
+                <span id="loc-lat">Lat: 48.7° N</span>
+                <span id="loc-lon">Lon: 19.5° E</span>
+            </div>
+        </div>
+
+        <div class="space-y-4 pt-2">
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1 block">Date Selection</label>
+                <input type="date" id="date-picker" class="w-full bg-gray-900/50 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white color-scheme-dark focus:border-blue-500 transition-colors">
+            </div>
+            
+            <div class="bg-gray-800/30 p-3 rounded-lg border border-gray-700/50">
+                <div class="flex justify-between text-xs text-blue-200 mb-2 font-semibold">
+                    <span id="doy-display">Day 1</span>
+                    <span id="season-label" class="text-yellow-400">Winter</span>
+                </div>
+                <input type="range" id="doy-slider" min="1" max="365" value="1" class="accent-blue-500">
+                <div class="flex justify-between text-[10px] text-gray-500 mt-1">
+                    <span>Jan</span><span>Mar</span><span>Jun</span><span>Sep</span><span>Dec</span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+                <button class="btn-season bg-emerald-900/40 hover:bg-emerald-800/60 border border-emerald-700/50 text-emerald-100 text-xs py-2.5 rounded-lg transition" data-doy="80">🌱 Spring</button>
+                <button class="btn-season bg-amber-900/40 hover:bg-amber-800/60 border border-amber-700/50 text-amber-100 text-xs py-2.5 rounded-lg transition" data-doy="172">☀️ Summer</button>
+                <button class="btn-season bg-orange-900/40 hover:bg-orange-800/60 border border-orange-700/50 text-orange-100 text-xs py-2.5 rounded-lg transition" data-doy="266">🍂 Autumn</button>
+                <button class="btn-season bg-indigo-900/40 hover:bg-indigo-800/60 border border-indigo-700/50 text-indigo-100 text-xs py-2.5 rounded-lg transition" data-doy="355">❄️ Winter</button>
+            </div>
+            
+            <button id="reset-today-btn" class="w-full bg-gray-700/50 hover:bg-gray-600 border border-gray-600 text-xs py-2 rounded-lg transition text-gray-300">Reset to Today</button>
+        </div>
+
+        <!-- Calibration Section (Always Visible) -->
+        <div class="space-y-3 border-t-2 border-blue-900/50 pt-3 mt-2 bg-blue-900/10 p-2 rounded">
+            <label class="text-xs font-bold text-blue-300 uppercase tracking-wider flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+                Manual Calibration
+            </label>
+            
+            <div>
+                <div class="flex justify-between text-[10px] text-gray-400 mb-1">
+                    <span>Rotate Earth (Find Europe)</span> <button id="reset-cal" class="text-blue-400 hover:text-blue-300">Reset</button>
+                </div>
+                <input type="range" id="cal-spin" min="0" max="6.28" step="0.01">
+            </div>
+
+            <div>
+                <div class="flex justify-between text-[10px] text-gray-400 mb-1">
+                    <span>Move Red Dot (Pin Slovakia)</span>
+                </div>
+                <input type="range" id="cal-marker" min="0" max="6.28" step="0.01">
+            </div>
+            <p class="text-[10px] text-gray-500 italic">Use these sliders to correct the Earth alignment.</p>
+        </div>
+        
+    </div>
+
+    <!-- UI Overlay: Results (Bottom Right) -->
+    <div class="absolute bottom-4 right-4 w-72 glass-panel text-gray-200 rounded-xl p-6 z-10 shadow-2xl border-l-4 border-l-blue-500">
+        <h2 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+            <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+            <span id="result-date">Calculating...</span>
+        </h2>
+        <div class="space-y-4">
+            <div class="flex justify-between items-baseline border-b border-gray-700/50 pb-2">
+                <span class="text-sm text-gray-400 font-medium">Solar Declination</span>
+                <span id="res-declination" class="font-mono text-blue-300 text-lg">0.00°</span>
+            </div>
+            <div class="flex justify-between items-baseline">
+                <span class="text-sm text-gray-400 font-medium">Day Length</span>
+                <span id="res-day-len" class="font-mono text-yellow-300 text-2xl font-bold drop-shadow-sm">00:00</span>
+            </div>
+            <div class="flex justify-between items-baseline">
+                <span class="text-sm text-gray-400 font-medium">Night Length</span>
+                <span id="res-night-len" class="font-mono text-indigo-300 text-2xl font-bold drop-shadow-sm">00:00</span>
+            </div>
+        </div>
+
+        <!-- LICENSE & CREATOR INFO SECTION -->
+        <!-- EDIT THIS SECTION WITH YOUR NAME/COMPANY -->
+        <div class="mt-6 pt-4 border-t border-gray-700/50 text-center">
+            <p class="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Developed & Licensed by</p>
+            <p class="text-sm font-bold text-blue-400">Tomas Kovalcik</p>
+            <p class="text-[9px] text-gray-500 mt-0.5">Certified AI Business Strategist</p>
+            <p class="text-[9px] text-gray-600 mt-2">© 2025 All Rights Reserved</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- Configuration & Constants ---
+        const TILT_RAD = 23.44 * (Math.PI / 180);
+        
+        const LOCATIONS = {
+            center: { name: "Slovakia (Center)", lat: 48.7, lon: 19.5 },
+            bratislava: { name: "Bratislava", lat: 48.1486, lon: 17.1077 },
+            kosice: { name: "Košice", lat: 48.7164, lon: 21.2611 },
+            presov: { name: "Prešov", lat: 49.0018, lon: 21.2393 }
+        };
+
+        // Persistence
+        function loadSettings() {
+            const savedSpin = localStorage.getItem('slovakia_viz_spin_v3');
+            const savedMarker = localStorage.getItem('slovakia_viz_marker_v3');
+            const savedLocKey = localStorage.getItem('slovakia_viz_location_v3');
+            
+            return {
+                spin: savedSpin ? parseFloat(savedSpin) : 5.8, // Default spin to put Europe right
+                marker: savedMarker ? parseFloat(savedMarker) : 3.14, // Default marker alignment
+                locKey: savedLocKey && LOCATIONS[savedLocKey] ? savedLocKey : 'center'
+            };
+        }
+
+        const settings = loadSettings();
+        const state = {
+            currentDate: new Date(),
+            dayOfYear: 1,
+            location: LOCATIONS[settings.locKey],
+            spinOffset: settings.spin, 
+            markerOffset: settings.marker 
+        };
+
+        // --- MATH HELPERS ---
+        function getDayOfYear(date) {
+            const start = new Date(date.getFullYear(), 0, 0);
+            const diff = date - start;
+            return Math.floor(diff / (1000 * 60 * 60 * 24));
+        }
+        function getDateFromDayOfYear(day) {
+            const date = new Date(new Date().getFullYear(), 0); 
+            return new Date(date.setDate(day));
+        }
+        function calculateDeclination(doy) {
+            return TILT_RAD * Math.sin((2 * Math.PI / 365) * (doy - 81));
+        }
+        function calculateDayLength(latDeg, declinationRad) {
+            const latRad = latDeg * (Math.PI / 180);
+            const num = Math.sin(-0.833 * (Math.PI/180)) - Math.sin(latRad) * Math.sin(declinationRad);
+            const den = Math.cos(latRad) * Math.cos(declinationRad);
+            let cosH = num / den;
+            if (cosH > 1) return 0; if (cosH < -1) return 24;
+            return (Math.acos(cosH) * (180 / Math.PI)) * 2 / 15;
+        }
+        function formatHours(h) {
+            const hrs = Math.floor(h); const mins = Math.round((h - hrs) * 60);
+            return `${hrs.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}`;
+        }
+        function getSeason(doy) {
+            if (doy < 80 || doy >= 355) return "Winter";
+            if (doy < 172) return "Spring";
+            if (doy < 266) return "Summer";
+            return "Autumn";
+        }
+
+        // --- 3D SETUP ---
+        const canvasContainer = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        const aspect = window.innerWidth / window.innerHeight;
+        const frustumSize = 12;
+        const camera = new THREE.OrthographicCamera(frustumSize * aspect / -2, frustumSize * aspect / 2, frustumSize / 2, frustumSize / -2, 1, 1000);
+        camera.position.set(0, 0, 100);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        canvasContainer.appendChild(renderer.domElement);
+
+        // Stars
+        const starGeo = new THREE.BufferGeometry();
+        const starPos = new Float32Array(2000 * 3);
+        for(let i=0; i<6000; i++) starPos[i] = (Math.random()-0.5)*100;
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+        scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({color: 0x8899bb, size: 0.08})));
+
+        // --- ASSET LOADING (Hybrid Online/Offline) ---
+        const textureLoader = new THREE.TextureLoader();
+        
+        // 1. Try to load local file (e.g., "earth_atmos_2048.jpg")
+        // 2. If error, load online URL
+        function loadHybridTexture(localFilename, onlineUrl) {
+            const texture = new THREE.Texture(); // Placeholder
+            // Attempt Local Load
+            const localLoader = new THREE.ImageLoader();
+            localLoader.load(
+                localFilename,
+                (image) => {
+                    texture.image = image;
+                    texture.needsUpdate = true;
+                    hideLoader();
+                },
+                undefined, // Progress
+                (err) => {
+                    // Local failed, try Online
+                    console.log(`Local ${localFilename} missing, trying online...`);
+                    const onlineLoader = new THREE.ImageLoader();
+                    onlineLoader.load(
+                        onlineUrl,
+                        (image) => {
+                            texture.image = image;
+                            texture.needsUpdate = true;
+                            hideLoader();
+                        },
+                        undefined,
+                        (err) => console.error("Online load failed too.")
+                    );
+                }
+            );
+            return texture;
+        }
+        
+        let loadedCount = 0;
+        function hideLoader() {
+            loadedCount++;
+            if(loadedCount >= 4) {
+                const l = document.getElementById('loader');
+                if(l) { l.style.opacity = 0; setTimeout(() => l.remove(), 500); }
+            }
+        }
+
+        const texColor = loadHybridTexture('earth_atmos_2048.jpg', 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg');
+        const texSpecular = loadHybridTexture('earth_specular_2048.jpg', 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_specular_2048.jpg');
+        const texNormal = loadHybridTexture('earth_normal_2048.jpg', 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg');
+        const texClouds = loadHybridTexture('earth_clouds_1024.png', 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_clouds_1024.png');
+
+        // EARTH MESH
+        const earthGroup = new THREE.Group();
+        earthGroup.position.set(-2, 0, 0); 
+        scene.add(earthGroup);
+
+        const earthMesh = new THREE.Mesh(
+            new THREE.SphereGeometry(3.5, 64, 64),
+            new THREE.MeshPhongMaterial({ 
+                map: texColor, specularMap: texSpecular, normalMap: texNormal,
+                specular: 0x222222, shininess: 15 
+            })
+        );
+        earthMesh.rotation.y = state.spinOffset;
+        earthGroup.add(earthMesh);
+
+        // CLOUDS
+        const cloudMesh = new THREE.Mesh(
+            new THREE.SphereGeometry(3.55, 64, 64),
+            new THREE.MeshPhongMaterial({ 
+                map: texClouds, transparent: true, opacity: 0.8, 
+                side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false 
+            })
+        );
+        earthMesh.add(cloudMesh);
+
+        // AXIS & LABELS
+        const axisLine = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,-4.5,0), new THREE.Vector3(0,4.5,0)]),
+            new THREE.LineBasicMaterial({ color: 0x60a5fa, linewidth: 2 })
+        );
+        earthGroup.add(axisLine);
+        function createLabel(text, y) {
+            const c = document.createElement('canvas'); c.width=64; c.height=64;
+            const cx = c.getContext('2d');
+            cx.font='bold 48px Arial'; cx.fillStyle='white'; cx.textAlign='center'; cx.textBaseline='middle';
+            cx.shadowBlur=4; cx.shadowColor='black'; cx.fillText(text, 32, 32);
+            const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c) }));
+            s.scale.set(1.5, 1.5, 1); s.position.set(0, y, 0); return s;
+        }
+        earthGroup.add(createLabel('N', 5.2));
+        earthGroup.add(createLabel('S', -5.2));
+
+        // MARKER
+        const markerGroup = new THREE.Group();
+        earthMesh.add(markerGroup);
+        const markerDot = new THREE.Mesh(new THREE.SphereGeometry(0.12), new THREE.MeshBasicMaterial({color: 0xff0000}));
+        markerGroup.add(markerDot);
+
+        function updateMarker() {
+            const latRad = state.location.lat * (Math.PI/180);
+            markerGroup.rotation.y = state.markerOffset;
+            const r = 3.5;
+            markerDot.position.set(0, r * Math.sin(latRad), r * Math.cos(latRad));
+        }
+        updateMarker();
+
+        // LIGHTING
+        const sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        sunLight.position.set(20, 2, 5); 
+        scene.add(sunLight);
+        scene.add(new THREE.AmbientLight(0x444455, 0.3));
+
+        // --- APP LOGIC ---
+        function updateAll() {
+            state.dayOfYear = getDayOfYear(state.currentDate);
+            document.getElementById('doy-slider').value = state.dayOfYear;
+            document.getElementById('date-picker').valueAsDate = state.currentDate;
+            document.getElementById('doy-display').innerText = `Day ${state.dayOfYear}`;
+            document.getElementById('season-label').innerText = getSeason(state.dayOfYear);
+
+            const decl = calculateDeclination(state.dayOfYear);
+            const dayLen = calculateDayLength(state.location.lat, decl);
+            
+            document.getElementById('res-declination').innerText = (decl * 180/Math.PI).toFixed(2) + "°";
+            document.getElementById('res-day-len').innerText = formatHours(dayLen);
+            document.getElementById('res-night-len').innerText = formatHours(24 - dayLen);
+            document.getElementById('result-date').innerText = state.currentDate.toLocaleDateString();
+
+            const tiltAngle = -TILT_RAD * Math.cos(2 * Math.PI * (state.dayOfYear - 172) / 365);
+            earthGroup.rotation.z = tiltAngle;
+        }
+
+        // --- LISTENERS ---
+        document.getElementById('doy-slider').addEventListener('input', (e) => {
+            state.currentDate = getDateFromDayOfYear(parseInt(e.target.value)); updateAll();
+        });
+        document.getElementById('date-picker').addEventListener('change', (e) => {
+            state.currentDate = e.target.valueAsDate || new Date(); updateAll();
+        });
+        document.querySelectorAll('.btn-season').forEach(b => b.addEventListener('click', (e) => {
+            state.currentDate = getDateFromDayOfYear(parseInt(e.target.dataset.doy)); updateAll();
+        }));
+        document.getElementById('reset-today-btn').addEventListener('click', () => {
+            state.currentDate = new Date(); updateAll();
+        });
+        document.getElementById('location-select').addEventListener('change', (e) => {
+            state.location = LOCATIONS[e.target.value];
+            document.getElementById('loc-lat').innerText = `Lat: ${state.location.lat}`;
+            localStorage.setItem('slovakia_viz_location_v3', e.target.value);
+            updateMarker(); updateAll();
+        });
+
+        // Calibration UI
+        document.getElementById('cal-spin').value = state.spinOffset;
+        document.getElementById('cal-spin').addEventListener('input', (e) => {
+            state.spinOffset = parseFloat(e.target.value);
+            earthMesh.rotation.y = state.spinOffset;
+            localStorage.setItem('slovakia_viz_spin_v3', state.spinOffset);
+        });
+        document.getElementById('cal-marker').value = state.markerOffset;
+        document.getElementById('cal-marker').addEventListener('input', (e) => {
+            state.markerOffset = parseFloat(e.target.value);
+            updateMarker();
+            localStorage.setItem('slovakia_viz_marker_v3', state.markerOffset);
+        });
+        document.getElementById('reset-cal').addEventListener('click', () => {
+            state.spinOffset = 5.8; state.markerOffset = 3.14;
+            document.getElementById('cal-spin').value = 5.8;
+            document.getElementById('cal-marker').value = 3.14;
+            earthMesh.rotation.y = 5.8; updateMarker();
+            localStorage.setItem('slovakia_viz_spin_v3', 5.8);
+            localStorage.setItem('slovakia_viz_marker_v3', 3.14);
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            cloudMesh.rotation.y += 0.0003;
+            renderer.render(scene, camera);
+        }
+        
+        document.getElementById('location-select').value = settings.locKey;
+        updateAll();
+        animate();
+        
+        window.onresize = () => {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera.left = frustumSize * aspect / -2;
+            camera.right = frustumSize * aspect / 2;
+            camera.top = frustumSize / 2;
+            camera.bottom = frustumSize / -2;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    </script>
+</body>
+</html>
